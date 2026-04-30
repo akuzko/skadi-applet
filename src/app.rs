@@ -224,7 +224,7 @@ impl cosmic::Application for AppModel {
     fn view_window(&self, _id: Id) -> Element<'_, Self::Message> {
         let mut content = widget::Column::new()
             .push(self.audio_section())
-            .padding(8)
+            .padding(16)
             .spacing(8);
 
         if let Some(media) = self.media_section() {
@@ -245,46 +245,50 @@ impl cosmic::Application for AppModel {
 
 impl AppModel {
     fn audio_section(&self) -> Element<'_, Message> {
-        let mute_label = if self.is_muted { "Unmute" } else { "Mute" };
         let mute_icon = if self.is_muted {
             "audio-volume-muted-symbolic"
         } else {
             "audio-volume-medium-symbolic"
         };
+        let mute_label = if self.is_muted { "Unmute" } else { "Mute" };
 
         let mute_button = widget::button::custom(
-            widget::Row::new()
-                .push(widget::icon::from_name(mute_icon).size(16))
-                .push(widget::text(mute_label))
-                .spacing(8)
-                .align_y(cosmic::iced::Alignment::Center),
+            widget::container(
+                widget::Row::new()
+                    .push(widget::icon::from_name(mute_icon).size(24))
+                    .push(widget::text(mute_label))
+                    .spacing(8)
+                    .align_y(cosmic::iced::Alignment::Center),
+            )
+            .align_x(cosmic::iced::Alignment::Center)
+            .width(Length::Fill),
         )
-        .on_press(Message::ToggleMute)
-        .width(Length::Fill);
+        .padding([8, 16])
+        .on_press(Message::ToggleMute);
+
+        let header_row = widget::Row::new()
+            .push(widget::text::heading("Audio").width(Length::Fill))
+            .push(mute_button)
+            .align_y(cosmic::iced::Alignment::Center);
 
         let mut col = widget::Column::new()
-            .push(widget::text::heading("Audio"))
-            .push(mute_button)
-            .spacing(4);
+            .push(header_row)
+            .spacing(8);
 
         if self.devices.is_empty() {
             col = col.push(widget::text("No output devices found").size(12));
         } else {
+            let mut list = widget::list_column();
             for device in &self.devices {
                 let is_default = self.default_device_id == Some(device.id);
                 let device_id = device.id;
-                let label = if is_default {
-                    format!("\u{25b8} {}", device.name)
-                } else {
-                    format!("   {}", device.name)
-                };
-
-                let btn = widget::button::custom(widget::text(label).size(13))
-                    .on_press(Message::SwitchDevice(device_id))
-                    .width(Length::Fill);
-
-                col = col.push(btn);
+                list = list.add(
+                    widget::list::button(widget::text(device.name.clone()).size(13))
+                        .on_press(Message::SwitchDevice(device_id))
+                        .selected(is_default),
+                );
             }
+            col = col.push(list);
         }
 
         col.into()
@@ -299,12 +303,19 @@ impl AppModel {
             "media-playback-start-symbolic"
         };
 
+        let play_label = if self.is_playing { "Pause" } else { "Play" };
+
         let play_button = widget::button::custom(
-            widget::Row::new()
-                .push(widget::icon::from_name(play_icon).size(16))
-                .push(widget::text(if self.is_playing { "Pause" } else { "Play" }))
-                .spacing(8)
-                .align_y(cosmic::iced::Alignment::Center),
+            widget::container(
+                widget::Row::new()
+                    .push(widget::icon::from_name(play_icon).size(24))
+                    .push(widget::text(play_label))
+                    .spacing(8)
+                    .padding([4, 4])
+                    .align_y(cosmic::iced::Alignment::Center),
+            )
+            .align_x(cosmic::iced::Alignment::Center)
+            .width(Length::Fill),
         )
         .on_press(Message::PlayPause)
         .width(Length::Fill);
