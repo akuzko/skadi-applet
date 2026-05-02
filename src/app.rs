@@ -286,21 +286,9 @@ impl AppModel {
         } else {
             "audio-volume-medium-symbolic"
         };
-        let mute_label = if self.is_muted { "Unmute" } else { "Mute" };
 
-        let mute_button = widget::button::custom(
-            widget::container(
-                widget::Row::new()
-                    .push(widget::icon::from_name(mute_icon).size(24))
-                    .push(widget::text(mute_label))
-                    .spacing(8)
-                    .align_y(cosmic::iced::Alignment::Center),
-            )
-            .align_x(cosmic::iced::Alignment::Center)
-            .width(Length::Fill),
-        )
-        .padding([8, 16])
-        .on_press(Message::ToggleMute);
+        let mute_button = widget::button::icon(widget::icon::from_name(mute_icon))
+            .on_press(Message::ToggleMute);
 
         let header_row = widget::Row::new()
             .push(widget::text::heading("Audio").width(Length::Fill))
@@ -360,10 +348,12 @@ impl AppModel {
             "media-playback-start-symbolic"
         };
 
-        let mut controls = widget::Row::new().spacing(4);
+        let mut controls = widget::Row::new()
+            .spacing(4)
+            .align_y(cosmic::iced::Alignment::Center);
 
         let prev_btn = widget::button::icon(
-            widget::icon::from_name("media-skip-backward-symbolic").size(24),
+            widget::icon::from_name("media-skip-backward-symbolic"),
         );
         controls = controls.push(if self.can_go_previous {
             prev_btn.on_press(Message::PreviousTrack)
@@ -372,12 +362,13 @@ impl AppModel {
         });
 
         controls = controls.push(
-            widget::button::icon(widget::icon::from_name(play_icon).size(24))
+            widget::button::icon(widget::icon::from_name(play_icon))
+                .medium()
                 .on_press(Message::PlayPause),
         );
 
         let next_btn = widget::button::icon(
-            widget::icon::from_name("media-skip-forward-symbolic").size(24),
+            widget::icon::from_name("media-skip-forward-symbolic"),
         );
         controls = controls.push(if self.can_go_next {
             next_btn.on_press(Message::NextTrack)
