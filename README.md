@@ -1,26 +1,80 @@
 # Skadi Applet
 
-Audio and media control applet for the COSMIC desktop
+Audio and media control applet for the [COSMIC](https://system76.com/cosmic) desktop.
 
-## Installation
+![Screenshot](cosmic-applet-skadi.png)
 
-A [justfile](./justfile) is included by default for the [casey/just][just] command runner.
+## Features
 
-- `just` builds the application with the default `just build-release` recipe
-- `just run` builds and runs the application
-- `just install` installs the project into the system
-- `just vendor` creates a vendored tarball
-- `just build-vendored` compiles with vendored dependencies from that tarball
-- `just check` runs clippy on the project to check for linter warnings
-- `just check-json` can be used by IDEs that support LSP
+### Audio
 
-## Translators
+- Toggle mute/unmute on the default audio output
+- List all available output devices and switch the default sink with a single click
+- Active device is highlighted in the list
 
-[Fluent][fluent] is used for localization of the software. Fluent's translation files are found in the [i18n directory](./i18n). New translations may copy the [English (en) localization](./i18n/en) of the project, rename `en` to the desired [ISO 639-1 language code][iso-codes], and then translations can be provided for each [message identifier][fluent-guide]. If no translation is necessary, the message may be omitted.
+### Media
+
+- Shows the active MPRIS media player name alongside the section header (e.g. **Media ⬩ Chrome**)
+- Displays the current track title and artist when available
+- Play/Pause, Previous, and Next track controls — Previous/Next are only active when the player reports it supports them (e.g. radio streams disable navigation)
+
+## Installing
+
+### From source
+
+You will need [just](https://github.com/casey/just) and the standard Rust toolchain ([rustup](https://rustup.rs/)), plus a few system libraries. On a Debian/Ubuntu-based system:
+
+```sh
+sudo apt install just libxkbcommon-dev
+```
+
+Clone the repo and install:
+
+```sh
+git clone https://github.com/akuzko/skadi-applet
+cd skadi-applet
+just build-release
+just install
+```
+
+To install without root (e.g. into `~/.local`):
+
+```sh
+just install rootdir=$HOME/.local prefix=''
+```
+
+This installs the binary to `~/.local/bin/skadi-applet` and the `.desktop` entry to `~/.local/share/applications/`.
+
+### Post-installation
+
+Once installed, the applet should appear in COSMIC Settings when editing applets on the panel or dock. It can also be launched directly from a terminal for testing:
+
+```sh
+skadi-applet
+```
+
+Logs can be viewed with:
+
+```sh
+journalctl SYSLOG_IDENTIFIER=skadi-applet
+```
+
+## Building
+
+```sh
+# Debug build
+just build
+
+# Release build
+just build-release
+
+# Run directly (without installing)
+just run
+```
 
 ## Packaging
 
-If packaging for a Linux distribution, vendor dependencies locally with the `vendor` rule, and build with the vendored sources using the `build-vendored` rule. When installing files, use the `rootdir` and `prefix` variables to change installation paths.
+To package for a Linux distribution, vendor dependencies first, then build from the vendored sources:
 
 ```sh
 just vendor
@@ -28,16 +82,19 @@ just build-vendored
 just rootdir=debian/skadi-applet prefix=/usr install
 ```
 
-It is recommended to build a source tarball with the vendored dependencies, which can typically be done by running `just vendor` on the host system before it enters the build environment.
-
 ## Developers
 
-Developers should install [rustup][rustup] and configure their editor to use [rust-analyzer][rust-analyzer].
+Developers should install [rustup](https://rustup.rs/) and configure their editor to use [rust-analyzer](https://rust-analyzer.github.io/).
 
-[fluent]: https://projectfluent.org/
-[fluent-guide]: https://projectfluent.org/fluent/guide/hello.html
-[iso-codes]: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
-[just]: https://github.com/casey/just
-[rustup]: https://rustup.rs/
-[rust-analyzer]: https://rust-analyzer.github.io/
-[sccache]: https://github.com/mozilla/sccache
+A [justfile](./justfile) is included for the [casey/just](https://github.com/casey/just) command runner:
+
+- `just` — release build (default)
+- `just run` — build and run
+- `just check` — run clippy
+- `just install` — install into the system
+- `just vendor` — create a vendored dependency tarball
+- `just build-vendored` — compile using vendored dependencies
+
+## Translators
+
+[Fluent](https://projectfluent.org/) is used for localization. Translation files are in the [i18n directory](./i18n). To add a new translation, copy the [English (en)](./i18n/en) directory, rename it to the desired [ISO 639-1 language code](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes), and provide translations for each message identifier. Messages that don't need translation can be omitted.
