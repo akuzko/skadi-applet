@@ -15,13 +15,16 @@ use futures_util::SinkExt;
 use tokio::time::{Duration, interval};
 use tracing::warn;
 
-use crate::backend::mpris::{get_playback_status, list_players};
-use crate::types::MprisPlayer;
+use crate::backend::mpris::{get_nav_caps, get_playback_status, get_track_info, list_players};
+use crate::types::{MprisPlayer, TrackInfo};
 
 #[derive(Clone, Debug)]
 pub struct MprisState {
     pub active_player: Option<MprisPlayer>,
     pub is_playing: bool,
+    pub track_info: Option<TrackInfo>,
+    pub can_go_previous: bool,
+    pub can_go_next: bool,
 }
 
 pub fn mpris_subscription() -> Subscription<MprisState> {
@@ -37,6 +40,9 @@ pub fn mpris_subscription() -> Subscription<MprisState> {
                         .send(MprisState {
                             active_player: None,
                             is_playing: false,
+                            track_info: None,
+                            can_go_previous: false,
+                            can_go_next: false,
                         })
                         .await;
                     return;
@@ -69,6 +75,9 @@ async fn poll_state(
             return MprisState {
                 active_player: None,
                 is_playing: false,
+                track_info: None,
+                can_go_previous: false,
+                can_go_next: false,
             };
         }
     };
@@ -78,6 +87,9 @@ async fn poll_state(
         return MprisState {
             active_player: None,
             is_playing: false,
+            track_info: None,
+            can_go_previous: false,
+            can_go_next: false,
         };
     }
 
@@ -93,31 +105,45 @@ async fn poll_state(
         statuses.push((player.clone(), status));
     }
 
-    // 1. A currently-Playing player always wins
-    if let Some((player, _)) = statuses.iter().find(|(_, s)| s == "Playing") {
-        let is_playing = true;
-        *last_active = Some(player.clone());
-        return MprisState {
-            active_player: Some(player.clone()),
-            is_playing,
+    // Resolve the active player (same heuristic as before)
+    let (active_player, is_playing) =
+        // 1. A currently-Playing player always wins
+        if let Some((player, _)) = statuses.iter().find(|(_, s)| s == "Playing") {
+            *last_active = Some(player.clone());
+            (player.clone(), true)
+        // 2. If the previously-tracked player is still present, keep it
+        } else if let Some(ref prev) = last_active.clone() {
+            if let Some((player, status)) = statuses.iter().find(|(p, _)| p.bus_name == prev.bus_name) {
+                (player.clone(), status == "Playing")
+            } else {
+                // 3. Fall back to first available player
+                let (player, status) = &statuses[0];
+                *last_active = Some(player.clone());
+                (player.clone(), status == "Playing")
+            }
+        } else {
+            // 3. Fall back to first available player
+            let (player, status) = &statuses[0];
+            *last_active = Some(player.clone());
+            (player.clone(), status == "Playing")
         };
-    }
 
-    // 2. If the previously-tracked player is still present, keep it
-    if let Some(ref prev) = last_active.clone() {
-        if let Some((player, status)) = statuses.iter().find(|(p, _)| p.bus_name == prev.bus_name) {
-            return MprisState {
-                active_player: Some(player.clone()),
-                is_playing: status == "Playing",
-            };
+    let track_info = {
+        let info = get_track_info(conn, &active_player.bus_name).await;
+        if info.title.is_some() || info.artist.is_some() {
+            Some(info)
+        } else {
+            None
         }
-    }
+    };
 
-    // 3. Fall back to first available player
-    let (player, status) = &statuses[0];
-    *last_active = Some(player.clone());
+    let (can_go_previous, can_go_next) = get_nav_caps(conn, &active_player.bus_name).await;
+
     MprisState {
-        active_player: Some(player.clone()),
-        is_playing: status == "Playing",
+        active_player: Some(active_player),
+        is_playing,
+        track_info,
+        can_go_previous,
+        can_go_next,
     }
 }

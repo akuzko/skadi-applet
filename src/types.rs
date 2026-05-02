@@ -15,3 +15,12 @@ pub struct MprisPlayer {
     /// Human-readable player name from the `Identity` property.
     pub name: String,
 }
+
+/// Track metadata from the MPRIS `Metadata` property.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct TrackInfo {
+    /// `xesam:title` — track/video title.
+    pub title: Option<String>,
+    /// `xesam:artist` — artist(s), joined with ", ".
+    pub artist: Option<String>,
+}

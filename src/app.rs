@@ -9,10 +9,10 @@ use cosmic::Element;
 use tracing::warn;
 
 use crate::backend::audio::{fetch_audio_state, set_default_sink, toggle_mute};
-use crate::backend::mpris::play_pause;
+use crate::backend::mpris::{next_track, play_pause, previous_track};
 use crate::subscriptions::audio::audio_subscription;
 use crate::subscriptions::mpris::{MprisState, mpris_subscription};
-use crate::types::{AudioDevice, MprisPlayer};
+use crate::types::{AudioDevice, MprisPlayer, TrackInfo};
 
 // ── Application model ─────────────────────────────────────────────────────────
 
@@ -29,6 +29,9 @@ pub struct AppModel {
     // MPRIS state
     active_player: Option<MprisPlayer>,
     is_playing: bool,
+    track_info: Option<TrackInfo>,
+    can_go_previous: bool,
+    can_go_next: bool,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -43,6 +46,8 @@ pub enum Message {
     ToggleMute,
     SwitchDevice(u32),
     PlayPause,
+    PreviousTrack,
+    NextTrack,
 
     // State updates from subscriptions
     AudioStateUpdate(crate::backend::audio::AudioState),
@@ -136,11 +141,39 @@ impl cosmic::Application for AppModel {
                     return cosmic::task::future(async move {
                         let conn = match zbus::Connection::session().await {
                             Ok(c) => c,
-                            Err(e) => {
-                                return Message::CommandResult(Err(e.to_string()));
-                            }
+                            Err(e) => return Message::CommandResult(Err(e.to_string())),
                         };
                         let result = play_pause(&conn, &player.bus_name)
+                            .await
+                            .map_err(|e| e.to_string());
+                        Message::CommandResult(result)
+                    });
+                }
+            }
+
+            Message::PreviousTrack => {
+                if let Some(player) = self.active_player.clone() {
+                    return cosmic::task::future(async move {
+                        let conn = match zbus::Connection::session().await {
+                            Ok(c) => c,
+                            Err(e) => return Message::CommandResult(Err(e.to_string())),
+                        };
+                        let result = previous_track(&conn, &player.bus_name)
+                            .await
+                            .map_err(|e| e.to_string());
+                        Message::CommandResult(result)
+                    });
+                }
+            }
+
+            Message::NextTrack => {
+                if let Some(player) = self.active_player.clone() {
+                    return cosmic::task::future(async move {
+                        let conn = match zbus::Connection::session().await {
+                            Ok(c) => c,
+                            Err(e) => return Message::CommandResult(Err(e.to_string())),
+                        };
+                        let result = next_track(&conn, &player.bus_name)
                             .await
                             .map_err(|e| e.to_string());
                         Message::CommandResult(result)
@@ -158,6 +191,9 @@ impl cosmic::Application for AppModel {
             Message::MprisUpdate(state) => {
                 self.active_player = state.active_player;
                 self.is_playing = state.is_playing;
+                self.track_info = state.track_info;
+                self.can_go_previous = state.can_go_previous;
+                self.can_go_next = state.can_go_next;
             }
 
             Message::CommandResult(Err(e)) => {
@@ -297,34 +333,63 @@ impl AppModel {
     fn media_section(&self) -> Option<Element<'_, Message>> {
         let player = self.active_player.as_ref()?;
 
+        let header = widget::text::heading(format!("Media  \u{2B29}  {}", player.name));
+
+        // ── Track info ─────────────────────────────────────────────────────
+        let mut col = widget::Column::new()
+            .push(header)
+            .spacing(4);
+
+        if let Some(track_info) = &self.track_info {
+            if let Some(title) = &track_info.title {
+                col = col.push(widget::text(title.clone()).size(13));
+            }
+            if let Some(artist) = &track_info.artist {
+                col = col.push(
+                    widget::text(artist.clone())
+                        .size(11)
+                        .class(cosmic::theme::Text::Default),
+                );
+            }
+        }
+
+        // ── Controls row: Previous | Play/Pause | Next ─────────────────────
         let play_icon = if self.is_playing {
             "media-playback-pause-symbolic"
         } else {
             "media-playback-start-symbolic"
         };
 
-        let play_label = if self.is_playing { "Pause" } else { "Play" };
+        let mut controls = widget::Row::new().spacing(4);
 
-        let play_button = widget::button::custom(
-            widget::container(
-                widget::Row::new()
-                    .push(widget::icon::from_name(play_icon).size(24))
-                    .push(widget::text(play_label))
-                    .spacing(8)
-                    .padding([4, 4])
-                    .align_y(cosmic::iced::Alignment::Center),
-            )
-            .align_x(cosmic::iced::Alignment::Center)
-            .width(Length::Fill),
-        )
-        .on_press(Message::PlayPause)
-        .width(Length::Fill);
+        let prev_btn = widget::button::icon(
+            widget::icon::from_name("media-skip-backward-symbolic").size(24),
+        );
+        controls = controls.push(if self.can_go_previous {
+            prev_btn.on_press(Message::PreviousTrack)
+        } else {
+            prev_btn
+        });
 
-        let col = widget::Column::new()
-            .push(widget::text::heading("Media"))
-            .push(widget::text(player.name.clone()).size(12))
-            .push(play_button)
-            .spacing(4);
+        controls = controls.push(
+            widget::button::icon(widget::icon::from_name(play_icon).size(24))
+                .on_press(Message::PlayPause),
+        );
+
+        let next_btn = widget::button::icon(
+            widget::icon::from_name("media-skip-forward-symbolic").size(24),
+        );
+        controls = controls.push(if self.can_go_next {
+            next_btn.on_press(Message::NextTrack)
+        } else {
+            next_btn
+        });
+
+        col = col.push(
+            widget::container(controls)
+                .align_x(cosmic::iced::Alignment::Center)
+                .width(Length::Fill),
+        );
 
         Some(col.into())
     }

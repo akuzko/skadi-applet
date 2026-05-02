@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: MIT
 
+use std::collections::HashMap;
+use std::ops::Deref;
+
 use anyhow::{Context, Result};
 use zbus::Connection;
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
 use zbus::proxy;
+use zbus::zvariant::{OwnedValue, Value};
 
-use crate::types::MprisPlayer;
+use crate::types::{MprisPlayer, TrackInfo};
 
 const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
 
@@ -27,9 +31,20 @@ trait MediaPlayer2 {
 )]
 trait MediaPlayer2Player {
     fn play_pause(&self) -> zbus::Result<()>;
+    fn next(&self) -> zbus::Result<()>;
+    fn previous(&self) -> zbus::Result<()>;
 
     #[zbus(property)]
     fn playback_status(&self) -> zbus::Result<String>;
+
+    #[zbus(property)]
+    fn metadata(&self) -> zbus::Result<HashMap<String, OwnedValue>>;
+
+    #[zbus(property)]
+    fn can_go_next(&self) -> zbus::Result<bool>;
+
+    #[zbus(property)]
+    fn can_go_previous(&self) -> zbus::Result<bool>;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -94,6 +109,112 @@ pub async fn get_playback_status(conn: &Connection, bus_name: &str) -> Result<St
         .playback_status()
         .await
         .context("failed to get PlaybackStatus")
+}
+
+/// Fetch track metadata (`xesam:title`, `xesam:artist`) for a player.
+/// Returns `TrackInfo` with whichever fields could be read; all fields are
+/// `None` if metadata is unavailable.
+pub async fn get_track_info(conn: &Connection, bus_name: &str) -> TrackInfo {
+    let Ok(bus) = BusName::try_from(bus_name) else {
+        return TrackInfo::default();
+    };
+
+    let proxy = match MediaPlayer2PlayerProxy::builder(conn)
+        .destination(bus)
+        .unwrap()
+        .build()
+        .await
+    {
+        Ok(p) => p,
+        Err(_) => return TrackInfo::default(),
+    };
+
+    let metadata = match proxy.metadata().await {
+        Ok(m) => m,
+        Err(_) => return TrackInfo::default(),
+    };
+
+    let title = metadata
+        .get("xesam:title")
+        .and_then(|v| match v.deref() {
+            Value::Str(s) => Some(s.to_string()),
+            _ => None,
+        })
+        .filter(|s| !s.is_empty());
+
+    let artist = metadata
+        .get("xesam:artist")
+        .and_then(|v| match v.deref() {
+            Value::Array(arr) => {
+                let strings: Vec<String> = arr
+                    .iter()
+                    .filter_map(|item| {
+                        if let Value::Str(s) = item {
+                            Some(s.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if strings.is_empty() { None } else { Some(strings.join(", ")) }
+            }
+            _ => None,
+        })
+        .filter(|s| !s.is_empty());
+
+    TrackInfo { title, artist }
+}
+
+/// Send `Next` to a player.
+pub async fn next_track(conn: &Connection, bus_name: &str) -> Result<()> {
+    let bus: BusName<'_> = BusName::try_from(bus_name)
+        .context("invalid D-Bus bus name")?;
+
+    let proxy = MediaPlayer2PlayerProxy::builder(conn)
+        .destination(bus)
+        .unwrap()
+        .build()
+        .await
+        .context("failed to build MediaPlayer2Player proxy")?;
+
+    proxy.next().await.context("Next call failed")
+}
+
+/// Send `Previous` to a player.
+pub async fn previous_track(conn: &Connection, bus_name: &str) -> Result<()> {
+    let bus: BusName<'_> = BusName::try_from(bus_name)
+        .context("invalid D-Bus bus name")?;
+
+    let proxy = MediaPlayer2PlayerProxy::builder(conn)
+        .destination(bus)
+        .unwrap()
+        .build()
+        .await
+        .context("failed to build MediaPlayer2Player proxy")?;
+
+    proxy.previous().await.context("Previous call failed")
+}
+
+/// Query whether the player supports `Next` and `Previous`.
+/// Returns `(can_go_previous, can_go_next)`.
+pub async fn get_nav_caps(conn: &Connection, bus_name: &str) -> (bool, bool) {
+    let Ok(bus) = BusName::try_from(bus_name) else {
+        return (false, false);
+    };
+
+    let proxy = match MediaPlayer2PlayerProxy::builder(conn)
+        .destination(bus)
+        .unwrap()
+        .build()
+        .await
+    {
+        Ok(p) => p,
+        Err(_) => return (false, false),
+    };
+
+    let can_prev = proxy.can_go_previous().await.unwrap_or(false);
+    let can_next = proxy.can_go_next().await.unwrap_or(false);
+    (can_prev, can_next)
 }
 
 /// Send `PlayPause` to a player.
