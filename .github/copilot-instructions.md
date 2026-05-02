@@ -5,7 +5,7 @@
 A COSMIC desktop panel applet written in Rust that provides:
 
 - Audio mute/unmute toggle and output device switching (via wpctl CLI / PipeWire)
-- MPRIS media player play/pause control (via D-Bus / zbus)
+- MPRIS media player control: play/pause, previous/next track, track info display (via D-Bus / zbus)
 
 App ID: `io.github.akuzko.skadi-applet`
 
@@ -27,10 +27,11 @@ App ID: `io.github.akuzko.skadi-applet`
 src/
   main.rs           — entry point; tracing init; calls cosmic::applet::run::<app::AppModel>(())
   app.rs            — AppModel, Message enum, Application trait impl, all UI
-  types.rs          — AudioDevice { id: u32, name: String }, MprisPlayer { bus_name, name }
+  types.rs          — AudioDevice { id, name }, MprisPlayer { bus_name, name }, TrackInfo { title, artist }
   backend/
     audio.rs        — wpctl CLI calls: fetch_audio_state, toggle_mute, set_default_sink, list_sinks_and_default
-    mpris.rs        — zbus proxies + list_players, get_playback_status, play_pause
+    mpris.rs        — zbus proxies + list_players, get_playback_status, play_pause, next_track,
+                      previous_track, get_track_info, get_nav_caps
   subscriptions/
     audio.rs        — Subscription::run_with; D-Bus-driven (org.PulseAudio1) + polling fallback
     mpris.rs        — Subscription::run_with; 1s polling; last-active player heuristic
@@ -158,8 +159,13 @@ fn on_close_requested(&self, id: Id) -> Option<Message> {
 - Uses **zbus 4** `#[proxy]` macros for type-safe D-Bus proxies
 - Bus name prefix: `org.mpris.MediaPlayer2.`
 - `MediaPlayer2` interface: `Identity` property
-- `MediaPlayer2.Player` interface: `PlaybackStatus` property, `PlayPause` method
+- `MediaPlayer2.Player` interface:
+  - Properties: `PlaybackStatus`, `Metadata` (`HashMap<String, OwnedValue>`), `CanGoNext`, `CanGoPrevious`
+  - Methods: `PlayPause`, `Next`, `Previous`
 - `list_players` enumerates all bus names matching the prefix
+- `get_track_info` reads `xesam:title` (string) and `xesam:artist` (array of strings) from `Metadata`;
+  match on `Value::Str` / `Value::Array` via `Deref` to `Value` — do NOT use `TryFrom<&OwnedValue>`
+- `get_nav_caps` returns `(can_go_previous, can_go_next)` booleans; defaults to `false` on any error
 - Each D-Bus call opens its own connection or reuses a passed `&zbus::Connection`
 
 ## Audio Subscription Strategy
@@ -173,10 +179,13 @@ fn on_close_requested(&self, id: Id) -> Option<Message> {
 ## MPRIS Subscription Strategy
 
 - 1-second polling loop via `tokio::time::interval`
+- `MprisState` carries: `active_player`, `is_playing`, `track_info: Option<TrackInfo>`, `can_go_previous`, `can_go_next`
 - Active player heuristic:
   1. Any player currently `"Playing"` → wins
   2. Previously tracked player still in list → keep it
   3. Fallback to first player found
+- After resolving the active player, `get_track_info` and `get_nav_caps` are called for it each poll cycle
+- `track_info` is `None` when both `title` and `artist` are empty
 
 ## Common Pitfalls
 
@@ -187,6 +196,12 @@ fn on_close_requested(&self, id: Id) -> Option<Message> {
 - `futures_util::channel::mpsc::Sender` will not resolve — import from `futures::channel::mpsc::Sender`.
 - Applets require `type Executor = cosmic::SingleThreadExecutor`, not the default.
 - `style()` must return `Option<cosmic::iced::theme::Style>`, not `Appearance`.
+- `widget::icon::from_name(...).size(n)` does **not** affect rendered pixel size — it only hints the icon
+  theme variant. For `widget::button::icon`, use the preset methods to control rendered size:
+  `.extra_small()` = 16 px (same as default symbolic), `.medium()` = 32 px, `.large()` = 40 px,
+  `.extra_large()` = 56 px.
+- `OwnedValue::try_from` / `TryFrom<&OwnedValue>` is not implemented for `String` or `Vec<String>`.
+  Use `v.deref()` to get a `&Value<'_>` and match on `Value::Str` / `Value::Array`.
 
 ## Building & Running
 
